@@ -1,0 +1,1880 @@
+<!DOCTYPE html>
+<html lang="sv" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkannerPro – Streckkods- & QR-skanner med AdminVy</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- Html5-QRCode Bibliotek för kameraskanning i realtid -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    animation: {
+                        'scan-line': 'scanLine 2.4s ease-in-out infinite',
+                        'pulse-glow': 'pulseGlow 2s infinite',
+                    },
+                    keyframes: {
+                        scanLine: {
+                            '0%, 100%': { top: '12%' },
+                            '50%': { top: '86%' },
+                        },
+                        pulseGlow: {
+                            '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+                            '50%': { opacity: '0.7', transform: 'scale(0.98)' },
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Dölj bibliotekets egna standardknappar så vårt skräddarsydda gränssnitt styr kameran */
+        #qr-reader {
+            border: none !important;
+            width: 100% !important;
+            background: #020617 !important;
+        }
+        #qr-reader video {
+            width: 100% !important;
+            height: 100% !important;
+            object-fit: cover !important;
+            border-radius: 0.75rem;
+        }
+        #qr-reader__dashboard,
+        #qr-reader__scan_region img,
+        #qr-shaded-region {
+            display: none !important;
+        }
+        /* Snygg scrollbar för produktlistan och katalogen */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(51, 65, 85, 0.8);
+            border-radius: 9999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(34, 211, 238, 0.6);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans antialiased selection:bg-cyan-500/30 selection:text-cyan-200">
+
+    <!-- Toppnavigation / Header -->
+    <header class="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-emerald-500 flex items-center justify-center shadow-lg shadow-cyan-500/20 shrink-0">
+                    <svg class="w-6 h-6 text-slate-950" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M7 12h10" />
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2 flex-wrap">
+                        SkannerPro
+                        <span id="header-mode-badge" class="text-[11px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">Skanningsläge</span>
+                    </h1>
+                    <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+                        <span id="cloud-sync-badge" class="inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/25 px-2 py-0.5 rounded-full">
+                            <span id="cloud-sync-dot" class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse"></span>
+                            <span id="cloud-sync-text">Ansluter molnsynk...</span>
+                        </span>
+                        <p id="header-subtitle" class="text-xs text-slate-400 hidden md:block">Skanna streckkoder & QR-koder direkt till listan</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Högerkontroller: Ljud + AdminVy-knapp -->
+            <div class="flex items-center gap-2">
+                <button id="toggle-sound-btn" type="button" title="Växla pipljud vid skanning" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs font-medium transition active:scale-95">
+                    <svg id="sound-on-icon" class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
+                    </svg>
+                    <svg id="sound-off-icon" class="w-4 h-4 text-slate-500 hidden" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                    </svg>
+                    <span id="sound-label" class="hidden sm:inline">Ljud på</span>
+                </button>
+
+                <!-- Knapp för att öppna Admin-inloggning -->
+                <button id="open-admin-modal-btn" type="button" class="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-purple-500/15 border border-slate-700 hover:border-purple-500/50 text-slate-200 hover:text-purple-300 text-xs font-semibold transition active:scale-95">
+                    <svg class="w-4 h-4 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    <span>Admin</span>
+                </button>
+
+                <!-- Knapp för att lämna AdminVy (visas endast i Admin-läge) -->
+                <button id="exit-admin-btn" type="button" class="hidden flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/50 text-purple-200 text-xs font-semibold transition active:scale-95">
+                    <svg class="w-4 h-4 text-purple-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                    <span>Lämna AdminVy</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Admin Inloggningsmodal -->
+    <div id="admin-login-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div class="w-full max-w-sm bg-slate-900 border border-slate-700/90 rounded-2xl p-6 shadow-2xl relative">
+            <button id="close-admin-modal-btn" type="button" class="absolute top-4 right-4 w-8 h-8 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+
+            <div class="w-12 h-12 rounded-2xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center mb-4">
+                <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                </svg>
+            </div>
+
+            <h2 class="text-lg font-bold text-white mb-1">Öppna AdminVy</h2>
+            <p class="text-xs text-slate-400 mb-4 leading-relaxed">Ange adminkoden för att lägga till koder i produktkatalogen, ta bort koder och hantera den skannade listan på alla enheter.</p>
+
+            <form id="admin-login-form" class="space-y-3">
+                <div>
+                    <label for="admin-code-input" class="block text-xs font-medium text-slate-300 mb-1">Adminkod</label>
+                    <input 
+                        type="password" 
+                        id="admin-code-input" 
+                        placeholder="Skriv in koden..." 
+                        autocomplete="off"
+                        class="w-full bg-slate-950 border border-slate-700 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/25 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                        required
+                    >
+                </div>
+
+                <div id="admin-login-error" class="hidden text-xs text-rose-300 bg-rose-500/15 border border-rose-500/30 rounded-xl px-3 py-2">
+                    Fel kod! Kontrollera koden och försök igen.
+                </div>
+
+                <div class="flex items-center gap-2 pt-1">
+                    <button type="button" id="cancel-admin-modal-btn" class="flex-1 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition">
+                        Avbryt
+                    </button>
+                    <button type="submit" class="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white font-bold text-xs shadow-lg shadow-purple-500/25 transition">
+                        Lås upp AdminVy
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Huvudinnehåll -->
+    <main class="max-w-5xl mx-auto px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+
+        <!-- VÄNSTER KOLUMN: Kameraskanner + Rollanpassad panel -->
+        <section class="lg:col-span-5 flex flex-col gap-4">
+
+            <!-- Skannerkort (Tillgängligt för både vanliga användare och Admin) -->
+            <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl relative overflow-hidden">
+                <!-- Visuell grön/cyan skanningsblixt vid lyckad träff -->
+                <div id="scan-flash" class="pointer-events-none absolute inset-0 bg-emerald-400/25 opacity-0 transition-opacity duration-200 z-20 rounded-2xl"></div>
+
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex items-center gap-2">
+                        <span id="status-dot" class="w-2.5 h-2.5 rounded-full bg-slate-600"></span>
+                        <span id="scanner-status-text" class="text-xs font-semibold uppercase tracking-wider text-slate-400">Kamera vilande</span>
+                    </div>
+                    <span class="text-[11px] font-mono text-slate-500 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">EAN • UPC • QR</span>
+                </div>
+
+                <!-- Notis när Admin använder "Skanna in kod till katalog" -->
+                <div id="admin-capture-banner" class="hidden mb-3 bg-purple-500/15 border border-purple-500/40 rounded-xl p-2.5 flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 text-xs text-purple-200 font-medium">
+                        <span class="w-2 h-2 rounded-full bg-purple-400 animate-ping"></span>
+                        <span>Skannar kod till formuläret...</span>
+                    </div>
+                    <button type="button" id="cancel-capture-btn" class="text-[11px] font-semibold text-purple-300 hover:text-white underline">Avbryt</button>
+                </div>
+
+                <!-- Kameravy-container -->
+                <div class="relative w-full aspect-[4/3] bg-slate-950 rounded-xl border border-slate-800 overflow-hidden flex items-center justify-center">
+                    <div id="qr-reader" class="w-full h-full"></div>
+
+                    <!-- Placeholder innan kameran startats -->
+                    <div id="camera-placeholder" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-slate-950/90 z-10">
+                        <div class="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mb-3 shadow-inner">
+                            <svg class="w-8 h-8 text-cyan-400" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+                            </svg>
+                        </div>
+                        <h2 class="text-sm font-semibold text-white mb-1">Redo att skanna</h2>
+                        <p class="text-xs text-slate-400 max-w-xs leading-relaxed">Tryck på knappen nedan för att aktivera kameran och skanna streckkoder eller QR-koder.</p>
+                    </div>
+
+                    <!-- Siktruta & Laserlinje (visas när kameran är igång) -->
+                    <div id="scan-overlay" class="hidden pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                        <div class="w-64 h-44 sm:w-72 sm:h-48 relative rounded-xl shadow-[0_0_0_9999px_rgba(2,6,23,0.52)]">
+                            <span class="absolute -top-0.5 -left-0.5 w-6 h-6 border-t-4 border-l-4 border-cyan-400 rounded-tl-lg"></span>
+                            <span class="absolute -top-0.5 -right-0.5 w-6 h-6 border-t-4 border-r-4 border-cyan-400 rounded-tr-lg"></span>
+                            <span class="absolute -bottom-0.5 -left-0.5 w-6 h-6 border-b-4 border-l-4 border-cyan-400 rounded-bl-lg"></span>
+                            <span class="absolute -bottom-0.5 -right-0.5 w-6 h-6 border-b-4 border-r-4 border-cyan-400 rounded-br-lg"></span>
+                            <div class="absolute left-3 right-3 h-0.5 bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_#34d399] animate-scan-line"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Kamerafelmeddelande -->
+                <div id="camera-error-box" class="hidden mt-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs leading-relaxed">
+                    <div class="flex items-start gap-2.5">
+                        <svg class="w-4 h-4 text-rose-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div>
+                            <p class="font-semibold text-rose-300" id="camera-error-title">Kameran kunde inte startas</p>
+                            <p class="text-rose-200/80 mt-0.5" id="camera-error-desc">Kontrollera att du gett webbläsaren tillstånd att använda kameran.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Start / Stopp-knappar -->
+                <div class="mt-4 flex gap-2.5">
+                    <button id="start-camera-btn" type="button" class="flex-1 py-3 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 font-bold text-sm shadow-lg shadow-cyan-500/20 flex items-center justify-center gap-2 transition active:scale-[0.98]">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                        Starta kamera
+                    </button>
+
+                    <button id="stop-camera-btn" type="button" class="hidden flex-1 py-3 px-4 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 font-semibold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98]">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z" />
+                        </svg>
+                        Stoppa kamera
+                    </button>
+                </div>
+            </div>
+
+            <!-- VANLIG VY: Snabbtest-kort (Vanliga användare kan bara skanna – inte lägga till/ta bort koder) -->
+            <div id="user-quicktest-card" class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl">
+                <div class="flex items-center justify-between mb-2.5">
+                    <h3 class="text-sm font-semibold text-white flex items-center gap-2">
+                        <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        Snabbtest utan kamera
+                    </h3>
+                    <span class="text-[11px] text-slate-500">Simulera skanning</span>
+                </div>
+                <p class="text-xs text-slate-400 mb-3">Saknar du kamera eller koder just nu? Tryck på en vara ur katalogen för att simulera en skanning:</p>
+                <div id="quicktest-buttons-grid" class="grid grid-cols-2 gap-2">
+                    <!-- Dynamiska snabbtestknappar från katalogen renderas här -->
+                </div>
+            </div>
+
+            <!-- ADMIN VY: Lägg till ny kod i produktkatalogen (Dold för vanliga användare) -->
+            <div id="admin-add-code-card" class="hidden bg-slate-900/95 border border-purple-500/40 rounded-2xl p-4 sm:p-5 shadow-xl shadow-purple-950/20">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                        <span class="w-2 h-2 rounded-full bg-purple-400"></span>
+                        Admin: Lägg till kod i katalogen
+                    </h3>
+                    <span class="text-[11px] font-semibold text-purple-300 bg-purple-500/15 border border-purple-500/30 px-2 py-0.5 rounded-md">AdminVy</span>
+                </div>
+
+                <form id="admin-catalog-form" class="space-y-3">
+                    <div>
+                        <label for="catalog-code-input" class="block text-xs font-medium text-slate-300 mb-1">Streckkod eller QR-kod *</label>
+                        <div class="flex gap-2">
+                            <input 
+                                type="text" 
+                                id="catalog-code-input" 
+                                placeholder="T.ex. 7310865004703 eller QR-101" 
+                                class="flex-1 bg-slate-950 border border-slate-700 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/25 rounded-xl px-3.5 py-2.5 text-sm font-mono text-white placeholder-slate-500 outline-none transition"
+                                required
+                            >
+                            <button type="button" id="scan-to-catalog-btn" title="Skanna koden med kameran direkt in i fältet" class="px-3 py-2.5 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/40 text-purple-300 text-xs font-semibold flex items-center gap-1.5 transition shrink-0">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
+                                </svg>
+                                <span>Skanna in</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="catalog-name-input" class="block text-xs font-medium text-slate-300 mb-1">Produktnamn *</label>
+                        <input 
+                            type="text" 
+                            id="catalog-name-input" 
+                            placeholder="T.ex. Arla Mellanmjölk 1,5L" 
+                            class="w-full bg-slate-950 border border-slate-700 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/25 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 outline-none transition"
+                            required
+                        >
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div>
+                            <label for="catalog-brand-input" class="block text-xs font-medium text-slate-300 mb-1">Varumärke / Kategori</label>
+                            <input 
+                                type="text" 
+                                id="catalog-brand-input" 
+                                placeholder="T.ex. Mejeri" 
+                                class="w-full bg-slate-950 border border-slate-700 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/25 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none transition"
+                            >
+                        </div>
+                        <div>
+                            <label for="catalog-price-input" class="block text-xs font-medium text-slate-300 mb-1">Pris / Info (valfritt)</label>
+                            <input 
+                                type="text" 
+                                id="catalog-price-input" 
+                                placeholder="T.ex. 16,90 kr" 
+                                class="w-full bg-slate-950 border border-slate-700 focus:border-purple-400 focus:ring-2 focus:ring-purple-500/25 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 outline-none transition"
+                            >
+                        </div>
+                    </div>
+
+                    <button type="submit" class="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-500 to-indigo-500 hover:from-purple-400 hover:to-indigo-400 text-white font-bold text-sm shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 transition active:scale-[0.98]">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                        </svg>
+                        Spara kod i katalogen
+                    </button>
+                </form>
+            </div>
+
+        </section>
+
+        <!-- HÖGER KOLUMN: Admin-katalog (endast Admin) + Skannad Produktlista -->
+        <section class="lg:col-span-7 flex flex-col gap-5">
+
+            <!-- ADMIN VY: Hantera sparade koder i katalogen (Lägg till / Ta bort) -->
+            <div id="admin-catalog-section" class="hidden bg-slate-900/95 border border-purple-500/35 rounded-2xl p-4 sm:p-5 shadow-xl">
+                <div class="flex flex-wrap items-center justify-between gap-2 pb-3 mb-3 border-b border-slate-800">
+                    <div>
+                        <h2 class="text-base font-bold text-white flex items-center gap-2">
+                            Registrerade koder i katalogen
+                            <span id="catalog-count-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/35">0 koder</span>
+                        </h2>
+                        <p class="text-xs text-slate-400 mt-0.5">När en användare skannar dessa koder hämtas namn och info direkt från molnet.</p>
+                    </div>
+                    <input 
+                        type="text" 
+                        id="catalog-search-input" 
+                        placeholder="Sök i katalogen..." 
+                        class="bg-slate-950 border border-slate-800 focus:border-purple-400 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 outline-none w-full sm:w-44"
+                    >
+                </div>
+
+                <div id="admin-catalog-list" class="space-y-2 max-h-64 overflow-y-auto pr-1">
+                    <!-- Katalograder renderas här -->
+                </div>
+            </div>
+
+            <!-- SKANNAD PRODUKTLISTA (Visas för både Vanliga användare och Admin, men endast Admin kan redigera/ta bort/rensa) -->
+            <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col min-h-[440px]">
+
+                <!-- Listans sidhuvud & verktyg -->
+                <div class="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-800">
+                    <div>
+                        <div class="flex items-center gap-2.5">
+                            <h2 class="text-base sm:text-lg font-bold text-white">Skannade produkter</h2>
+                            <span id="total-items-badge" class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                                0 st
+                            </span>
+                        </div>
+                        <p id="scanned-list-subtitle" class="text-xs text-slate-400 mt-0.5">Skanna en kod så läggs varan in här automatiskt</p>
+                    </div>
+
+                    <!-- Export- och rensningsknappar -->
+                    <div class="flex items-center gap-1.5 sm:gap-2">
+                        <button id="copy-list-btn" type="button" title="Kopiera listan till urklipp" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition active:scale-95 disabled:opacity-40 disabled:pointer-events-none" disabled>
+                            <svg class="w-3.5 h-3.5 text-cyan-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                            </svg>
+                            <span>Kopiera</span>
+                        </button>
+
+                        <button id="export-csv-btn" type="button" title="Ladda ner som CSV-fil för Excel" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 transition active:scale-95 disabled:opacity-40 disabled:pointer-events-none" disabled>
+                            <svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                            </svg>
+                            <span>CSV</span>
+                        </button>
+
+                        <!-- Rensa-knapp: Visas ENDAST i AdminVy -->
+                        <button id="clear-list-btn" type="button" title="Rensa hela listan (Endast Admin)" class="hidden px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-medium flex items-center gap-1.5 transition active:scale-95 disabled:opacity-40 disabled:pointer-events-none" disabled>
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Rensa</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Inline-bekräftelse för att rensa listan (Admin) -->
+                <div id="clear-confirm-banner" class="hidden mt-3 p-3 rounded-xl bg-rose-950/60 border border-rose-500/40 flex flex-wrap items-center justify-between gap-2">
+                    <span class="text-xs font-medium text-rose-200">Vill du ta bort alla skannade produkter från listan på alla enheter?</span>
+                    <div class="flex items-center gap-2">
+                        <button id="cancel-clear-btn" type="button" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition">Avbryt</button>
+                        <button id="confirm-clear-btn" type="button" class="px-2.5 py-1 rounded-lg bg-rose-500 hover:bg-rose-400 text-white text-xs font-semibold transition">Ja, rensa allt</button>
+                    </div>
+                </div>
+
+                <!-- Sök / filter i listan (visas när det finns fler än 3 rader) -->
+                <div id="list-filter-bar" class="hidden mt-3">
+                    <div class="relative">
+                        <svg class="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                        <input type="text" id="filter-input" placeholder="Filtrera i listan..." class="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/60 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 outline-none transition">
+                    </div>
+                </div>
+
+                <!-- Själva listan med skannade varor -->
+                <div id="product-list" class="mt-4 flex-1 space-y-2.5 overflow-y-auto max-h-[540px] pr-1">
+                    <!-- Tomt tillstånd -->
+                    <div id="empty-state" class="h-full min-h-[300px] flex flex-col items-center justify-center text-center p-6 border-2 border-dashed border-slate-800/80 rounded-2xl">
+                        <div class="w-14 h-14 rounded-2xl bg-slate-950 border border-slate-800 flex items-center justify-center mb-3 text-slate-500">
+                            <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.6" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+                            </svg>
+                        </div>
+                        <h3 class="text-sm font-semibold text-slate-300">Listan är tom</h3>
+                        <p class="text-xs text-slate-500 max-w-xs mt-1 leading-relaxed">
+                            Starta kameran och rikta den mot en streckkod eller QR-kod för att lägga till varan i listan.
+                        </p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <!-- Toast-notiser längst ner -->
+    <div id="toast-container" class="fixed bottom-4 right-4 left-4 sm:left-auto sm:w-96 z-50 flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- Dold textarea för pålitlig urklippskopiering i alla miljöer -->
+    <textarea id="clipboard-helper" class="fixed -top-96 left-0 opacity-0 pointer-events-none" aria-hidden="true"></textarea>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import {
+            getFirestore,
+            collection,
+            doc,
+            setDoc,
+            updateDoc,
+            deleteDoc,
+            onSnapshot,
+            getDocs
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        /**
+         * SkannerPro - Applikationslogik med Rollhantering & Delad Molnsynkronisering
+         * Adminkod: "Hugo"
+         */
+        document.addEventListener('DOMContentLoaded', async () => {
+            // --- Tillstånd & Inställningar ---
+            const ADMIN_PASSCODE = 'hugo'; // Jämförs skiftlägesokänsligt så både "Hugo" och "hugo" fungerar
+            const SHARED_APP_ID = 'skannerpro-shared'; // Gemensam global samling så ALLA enheter delar samma data
+            const LOCAL_CATALOG_KEY = 'skannerpro_backup_catalog_v2';
+            const LOCAL_SCANNED_KEY = 'skannerpro_backup_scanned_v2';
+
+            // Förladdade exempelkoder om både molnet och lokal backup är helt tomma första gången
+            const DEFAULT_CATALOG = {
+                '7310865004703': {
+                    code: '7310865004703',
+                    name: 'Arla Mellanmjölk 1,5L',
+                    brand: 'Mejeri',
+                    price: '16,90 kr',
+                    type: 'EAN-13',
+                    updatedAt: 1000
+                },
+                '3017620422003': {
+                    code: '3017620422003',
+                    name: 'Nutella Hasselnötskräm 350g',
+                    brand: 'Ferrero',
+                    price: '34,90 kr',
+                    type: 'EAN-13',
+                    updatedAt: 1001
+                },
+                '5449000000996': {
+                    code: '5449000000996',
+                    name: 'Coca-Cola Original 33cl',
+                    brand: 'Dryck',
+                    price: '12,00 kr',
+                    type: 'EAN-13',
+                    updatedAt: 1002
+                },
+                'QR-VIP-2026': {
+                    code: 'QR-VIP-2026',
+                    name: 'Entrébiljett VIP – Konsert',
+                    brand: 'Biljett',
+                    price: '495,00 kr',
+                    type: 'QR-KOD',
+                    updatedAt: 1003
+                }
+            };
+
+            let db = null;
+            let auth = null;
+            let currentUser = null;
+            let hasCloudCatalogSynced = false;
+            let hasCloudScannedSynced = false;
+
+            let isAdminMode = false;
+            let isCapturingForCatalog = false;
+            let scannedItems = loadBackupScanned();
+            let productCatalog = loadBackupCatalog();
+            let soundEnabled = true;
+            let html5QrCode = null;
+            let isScanning = false;
+            let lastScannedCode = null;
+            let lastScannedTime = 0;
+            const SCAN_COOLDOWN_MS = 1800;
+
+            // --- Lokal backup-hjälpare så att ingenting någonsin tappas bort ---
+            function loadBackupCatalog() {
+                try {
+                    const saved = localStorage.getItem(LOCAL_CATALOG_KEY);
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (parsed && typeof parsed === 'object') return parsed;
+                    }
+                } catch (e) {}
+                return { ...DEFAULT_CATALOG };
+            }
+
+            function saveBackupCatalog(catalogObj) {
+                try {
+                    localStorage.setItem(LOCAL_CATALOG_KEY, JSON.stringify(catalogObj));
+                } catch (e) {}
+            }
+
+            function loadBackupScanned() {
+                try {
+                    const saved = localStorage.getItem(LOCAL_SCANNED_KEY);
+                    if (saved) {
+                        const parsed = JSON.parse(saved);
+                        if (Array.isArray(parsed)) return parsed;
+                    }
+                } catch (e) {}
+                return [];
+            }
+
+            function saveBackupScanned(itemsArr) {
+                try {
+                    const clean = itemsArr.map(({ justUpdated, ...rest }) => rest);
+                    localStorage.setItem(LOCAL_SCANNED_KEY, JSON.stringify(clean));
+                } catch (e) {}
+            }
+
+            // --- DOM-element: Header, Molnsynk & Admin-modal ---
+            const headerModeBadge = document.getElementById('header-mode-badge');
+            const headerSubtitle = document.getElementById('header-subtitle');
+            const cloudSyncBadge = document.getElementById('cloud-sync-badge');
+            const cloudSyncDot = document.getElementById('cloud-sync-dot');
+            const cloudSyncText = document.getElementById('cloud-sync-text');
+            const openAdminModalBtn = document.getElementById('open-admin-modal-btn');
+            const exitAdminBtn = document.getElementById('exit-admin-btn');
+
+            const adminLoginModal = document.getElementById('admin-login-modal');
+            const closeAdminModalBtn = document.getElementById('close-admin-modal-btn');
+            const cancelAdminModalBtn = document.getElementById('cancel-admin-modal-btn');
+            const adminLoginForm = document.getElementById('admin-login-form');
+            const adminCodeInput = document.getElementById('admin-code-input');
+            const adminLoginError = document.getElementById('admin-login-error');
+
+            // --- DOM-element: Skanner ---
+            const startCameraBtn = document.getElementById('start-camera-btn');
+            const stopCameraBtn = document.getElementById('stop-camera-btn');
+            const cameraPlaceholder = document.getElementById('camera-placeholder');
+            const scanOverlay = document.getElementById('scan-overlay');
+            const cameraErrorBox = document.getElementById('camera-error-box');
+            const cameraErrorTitle = document.getElementById('camera-error-title');
+            const cameraErrorDesc = document.getElementById('camera-error-desc');
+            const statusDot = document.getElementById('status-dot');
+            const scannerStatusText = document.getElementById('scanner-status-text');
+            const scanFlash = document.getElementById('scan-flash');
+            const adminCaptureBanner = document.getElementById('admin-capture-banner');
+            const cancelCaptureBtn = document.getElementById('cancel-capture-btn');
+
+            // --- DOM-element: Vyer (Vanlig vs Admin) ---
+            const userQuicktestCard = document.getElementById('user-quicktest-card');
+            const quicktestButtonsGrid = document.getElementById('quicktest-buttons-grid');
+            const adminAddCodeCard = document.getElementById('admin-add-code-card');
+            const adminCatalogSection = document.getElementById('admin-catalog-section');
+            const adminCatalogForm = document.getElementById('admin-catalog-form');
+            const catalogCodeInput = document.getElementById('catalog-code-input');
+            const catalogNameInput = document.getElementById('catalog-name-input');
+            const catalogBrandInput = document.getElementById('catalog-brand-input');
+            const catalogPriceInput = document.getElementById('catalog-price-input');
+            const scanToCatalogBtn = document.getElementById('scan-to-catalog-btn');
+            const catalogCountBadge = document.getElementById('catalog-count-badge');
+            const catalogSearchInput = document.getElementById('catalog-search-input');
+            const adminCatalogList = document.getElementById('admin-catalog-list');
+
+            // --- DOM-element: Skannad lista ---
+            const productListEl = document.getElementById('product-list');
+            const emptyStateEl = document.getElementById('empty-state');
+            const totalItemsBadge = document.getElementById('total-items-badge');
+            const scannedListSubtitle = document.getElementById('scanned-list-subtitle');
+            const listFilterBar = document.getElementById('list-filter-bar');
+            const filterInput = document.getElementById('filter-input');
+
+            const copyListBtn = document.getElementById('copy-list-btn');
+            const exportCsvBtn = document.getElementById('export-csv-btn');
+            const clearListBtn = document.getElementById('clear-list-btn');
+            const clearConfirmBanner = document.getElementById('clear-confirm-banner');
+            const cancelClearBtn = document.getElementById('cancel-clear-btn');
+            const confirmClearBtn = document.getElementById('confirm-clear-btn');
+
+            const toggleSoundBtn = document.getElementById('toggle-sound-btn');
+            const soundOnIcon = document.getElementById('sound-on-icon');
+            const soundOffIcon = document.getElementById('sound-off-icon');
+            const soundLabel = document.getElementById('sound-label');
+            const toastContainer = document.getElementById('toast-container');
+            const clipboardHelper = document.getElementById('clipboard-helper');
+
+            // --- Molnsynk-status & Firestore-sökvägar ---
+            function setCloudStatus(state, text) {
+                if (state === 'synced') {
+                    cloudSyncBadge.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-300 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full transition-colors';
+                    cloudSyncDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse';
+                    cloudSyncText.textContent = text || 'Sparat & synkat i molnet';
+                } else if (state === 'syncing') {
+                    cloudSyncBadge.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium text-cyan-300 bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-0.5 rounded-full transition-colors';
+                    cloudSyncDot.className = 'w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping';
+                    cloudSyncText.textContent = text || 'Sparar i molnet...';
+                } else {
+                    cloudSyncBadge.className = 'inline-flex items-center gap-1.5 text-[11px] font-medium text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2.5 py-0.5 rounded-full transition-colors';
+                    cloudSyncDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400';
+                    cloudSyncText.textContent = text || 'Lokal backup aktiv';
+                }
+            }
+
+            // Säkert dokument-ID för Firestore (hanterar specialtecken i QR-koder/URL:er)
+            function toDocId(code) {
+                return encodeURIComponent(String(code)).replace(/\./g, '%2E');
+            }
+
+            // Delad global Firestore-samling: artifacts/skannerpro-shared/public/data/{catalog | scanned_items}
+            function getCatalogCollection() {
+                return collection(db, 'artifacts', SHARED_APP_ID, 'public', 'data', 'catalog');
+            }
+
+            function getScannedCollection() {
+                return collection(db, 'artifacts', SHARED_APP_ID, 'public', 'data', 'scanned_items');
+            }
+
+            // --- Initiera Firebase Firestore & realtidslyssnare ---
+            async function initCloudSync() {
+                try {
+                    if (typeof __firebase_config === 'undefined' || !__firebase_config) {
+                        throw new Error('Firebase-konfiguration saknas i miljön');
+                    }
+
+                    const firebaseConfig = typeof __firebase_config === 'string'
+                        ? JSON.parse(__firebase_config)
+                        : __firebase_config;
+
+                    const app = initializeApp(firebaseConfig);
+                    db = getFirestore(app);
+                    auth = getAuth(app);
+
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+
+                    currentUser = auth.currentUser;
+                    if (!currentUser) {
+                        throw new Error('Autentisering misslyckades');
+                    }
+
+                    // Kontrollera om molnkatalogen är tom allra första gången och synka upp befintliga koder
+                    const initialCatalogSnap = await getDocs(getCatalogCollection());
+                    if (initialCatalogSnap.empty) {
+                        const seedItems = Object.values(productCatalog);
+                        for (const entry of seedItems) {
+                            await setDoc(doc(getCatalogCollection(), toDocId(entry.code)), {
+                                ...entry,
+                                updatedAt: entry.updatedAt || Date.now()
+                            });
+                        }
+                    }
+
+                    // Om lokal backup hade skannade rader men molnet är tomt vid första start, ladda upp dem
+                    const initialScannedSnap = await getDocs(getScannedCollection());
+                    if (initialScannedSnap.empty && scannedItems.length > 0) {
+                        for (const item of scannedItems) {
+                            const { justUpdated, id, ...cleanItem } = item;
+                            await setDoc(doc(getScannedCollection(), toDocId(item.code)), cleanItem);
+                        }
+                    }
+
+                    // 1. Lyssna på delad produktkatalog i realtid
+                    onSnapshot(
+                        getCatalogCollection(),
+                        (snapshot) => {
+                            const cloudCatalog = {};
+                            snapshot.forEach((docSnap) => {
+                                const data = docSnap.data();
+                                if (data && data.code) {
+                                    cloudCatalog[data.code] = data;
+                                }
+                            });
+
+                            productCatalog = cloudCatalog;
+                            saveBackupCatalog(productCatalog);
+                            hasCloudCatalogSynced = true;
+
+                            if (hasCloudScannedSynced) {
+                                setCloudStatus('synced', 'Sparat & synkat i molnet');
+                            }
+                            renderCatalog();
+                            renderQuicktestButtons();
+                        },
+                        (error) => {
+                            console.error('Fel vid realtidslyssning på katalog:', error);
+                            setCloudStatus('offline', 'Synkfel – lokal backup aktiv');
+                        }
+                    );
+
+                    // 2. Lyssna på delad skannad lista i realtid
+                    onSnapshot(
+                        getScannedCollection(),
+                        (snapshot) => {
+                            const cloudItems = [];
+                            snapshot.forEach((docSnap) => {
+                                const data = docSnap.data();
+                                if (data && data.code) {
+                                    const existing = scannedItems.find(i => i.code === data.code);
+                                    cloudItems.push({
+                                        id: docSnap.id,
+                                        code: data.code,
+                                        name: data.name || data.code,
+                                        brand: data.brand || '',
+                                        price: data.price || '',
+                                        type: data.type || 'STRECKKOD',
+                                        quantity: Number(data.quantity) || 1,
+                                        timestamp: Number(data.timestamp) || 0,
+                                        source: data.source || 'catalog',
+                                        loading: Boolean(data.loading),
+                                        justUpdated: existing ? existing.justUpdated : false
+                                    });
+                                }
+                            });
+
+                            // Sortera i minnet (senast skannade överst)
+                            cloudItems.sort((a, b) => b.timestamp - a.timestamp);
+                            scannedItems = cloudItems;
+                            saveBackupScanned(scannedItems);
+                            hasCloudScannedSynced = true;
+
+                            if (hasCloudCatalogSynced) {
+                                setCloudStatus('synced', 'Sparat & synkat i molnet');
+                            }
+                            renderList();
+                        },
+                        (error) => {
+                            console.error('Fel vid realtidslyssning på skannad lista:', error);
+                            setCloudStatus('offline', 'Synkfel – lokal backup aktiv');
+                        }
+                    );
+                } catch (err) {
+                    console.error('Kunde inte ansluta till Firestore:', err);
+                    setCloudStatus('offline', 'Lokal backup aktiv');
+                }
+            }
+
+            // --- Roll- & Lägeshantering (Standardvy vs AdminVy) ---
+            function updateRoleUI() {
+                if (isAdminMode) {
+                    headerModeBadge.textContent = 'Admin-läge aktivt';
+                    headerModeBadge.className = 'text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.25)]';
+                    headerSubtitle.textContent = 'Administrera produktkatalogen, lägg till koder & hantera listan';
+                    openAdminModalBtn.classList.add('hidden');
+                    exitAdminBtn.classList.remove('hidden');
+
+                    userQuicktestCard.classList.add('hidden');
+                    adminAddCodeCard.classList.remove('hidden');
+                    adminCatalogSection.classList.remove('hidden');
+
+                    clearListBtn.classList.remove('hidden');
+                    scannedListSubtitle.textContent = 'Admin-behörighet: Klicka på ett namn för att redigera, ändra antal eller ta bort';
+                } else {
+                    headerModeBadge.textContent = 'Skanningsläge';
+                    headerModeBadge.className = 'text-[11px] font-semibold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/15 text-cyan-400 border border-cyan-500/30';
+                    headerSubtitle.textContent = 'Skanna streckkoder & QR-koder direkt till listan';
+                    openAdminModalBtn.classList.remove('hidden');
+                    exitAdminBtn.classList.add('hidden');
+
+                    setCaptureForCatalog(false);
+
+                    userQuicktestCard.classList.remove('hidden');
+                    adminAddCodeCard.classList.add('hidden');
+                    adminCatalogSection.classList.add('hidden');
+
+                    clearListBtn.classList.add('hidden');
+                    clearConfirmBanner.classList.add('hidden');
+                    scannedListSubtitle.textContent = 'Skanna en kod så läggs varan in här automatiskt';
+                }
+
+                renderList();
+                renderQuicktestButtons();
+            }
+
+            // Admin Modal-händelser
+            function openAdminModal() {
+                adminLoginError.classList.add('hidden');
+                adminCodeInput.value = '';
+                adminLoginModal.classList.remove('hidden');
+                setTimeout(() => adminCodeInput.focus(), 50);
+            }
+
+            function closeAdminModal() {
+                adminLoginModal.classList.add('hidden');
+                adminCodeInput.value = '';
+                adminLoginError.classList.add('hidden');
+            }
+
+            openAdminModalBtn.addEventListener('click', openAdminModal);
+            closeAdminModalBtn.addEventListener('click', closeAdminModal);
+            cancelAdminModalBtn.addEventListener('click', closeAdminModal);
+
+            adminLoginModal.addEventListener('click', (e) => {
+                if (e.target === adminLoginModal) closeAdminModal();
+            });
+
+            adminLoginForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const entered = adminCodeInput.value.trim().toLowerCase();
+                if (entered === ADMIN_PASSCODE) {
+                    isAdminMode = true;
+                    closeAdminModal();
+                    updateRoleUI();
+                    playBeepSound();
+                    showToast('Inloggad i AdminVy! Alla ändringar sparas på alla enheter.', 'success');
+                } else {
+                    adminLoginError.classList.remove('hidden');
+                    adminCodeInput.select();
+                }
+            });
+
+            exitAdminBtn.addEventListener('click', () => {
+                isAdminMode = false;
+                updateRoleUI();
+                showToast('Återgick till vanligt skanningsläge.', 'info');
+            });
+
+            // --- Ljudåterkoppling med Web Audio API ---
+            function playBeepSound() {
+                if (!soundEnabled) return;
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioCtx) return;
+                    const ctx = new AudioCtx();
+                    const now = ctx.currentTime;
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(1046.5, now);
+                    osc.frequency.setValueAtTime(1318.5, now + 0.07);
+                    
+                    gain.gain.setValueAtTime(0.001, now);
+                    gain.gain.exponentialRampToValueAtTime(0.18, now + 0.015);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+                    
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.19);
+                } catch (e) {}
+            }
+
+            function triggerVisualFeedback() {
+                scanFlash.classList.remove('opacity-0');
+                scanFlash.classList.add('opacity-100');
+                setTimeout(() => {
+                    scanFlash.classList.remove('opacity-100');
+                    scanFlash.classList.add('opacity-0');
+                }, 220);
+            }
+
+            function showToast(message, type = 'info') {
+                const toast = document.createElement('div');
+                const colors = {
+                    success: 'bg-slate-900 border-emerald-500/50 text-emerald-200',
+                    info: 'bg-slate-900 border-cyan-500/50 text-cyan-200',
+                    warning: 'bg-slate-900 border-amber-500/50 text-amber-200',
+                    error: 'bg-slate-900 border-rose-500/50 text-rose-200',
+                    admin: 'bg-slate-900 border-purple-500/50 text-purple-200'
+                };
+                const dotColors = {
+                    success: 'bg-emerald-400',
+                    info: 'bg-cyan-400',
+                    warning: 'bg-amber-400',
+                    error: 'bg-rose-400',
+                    admin: 'bg-purple-400'
+                };
+
+                toast.className = `pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl border shadow-2xl text-xs font-medium transition-all duration-300 translate-y-2 opacity-0 ${colors[type] || colors.info}`;
+                toast.innerHTML = `
+                    <span class="w-2 h-2 rounded-full shrink-0 ${dotColors[type] || dotColors.info}"></span>
+                    <span class="flex-1 leading-snug">${escapeHtml(message)}</span>
+                `;
+                toastContainer.appendChild(toast);
+
+                requestAnimationFrame(() => {
+                    toast.classList.remove('translate-y-2', 'opacity-0');
+                });
+
+                setTimeout(() => {
+                    toast.classList.add('opacity-0', 'translate-y-2');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3200);
+            }
+
+            function updateSoundUI() {
+                if (soundEnabled) {
+                    soundOnIcon.classList.remove('hidden');
+                    soundOffIcon.classList.add('hidden');
+                    soundLabel.textContent = 'Ljud på';
+                } else {
+                    soundOnIcon.classList.add('hidden');
+                    soundOffIcon.classList.remove('hidden');
+                    soundLabel.textContent = 'Ljud av';
+                }
+            }
+
+            toggleSoundBtn.addEventListener('click', () => {
+                soundEnabled = !soundEnabled;
+                updateSoundUI();
+                if (soundEnabled) playBeepSound();
+            });
+
+            // --- Hjälpfunktioner för kodtyp & API-uppslag ---
+            function detectCodeType(code, rawFormatName = '') {
+                if (rawFormatName) {
+                    const fmt = rawFormatName.toUpperCase();
+                    if (fmt.includes('QR')) return 'QR-KOD';
+                    if (fmt.includes('EAN_13') || fmt.includes('EAN-13')) return 'EAN-13';
+                    if (fmt.includes('EAN_8') || fmt.includes('EAN-8')) return 'EAN-8';
+                    if (fmt.includes('UPC')) return 'UPC';
+                    if (fmt.includes('CODE_128')) return 'CODE-128';
+                    return fmt.replace('_', '-');
+                }
+                const trimmed = code.trim();
+                if (/^\d{13}$/.test(trimmed)) return 'EAN-13';
+                if (/^\d{8}$/.test(trimmed)) return 'EAN-8';
+                if (/^\d{12}$/.test(trimmed)) return 'UPC-A';
+                if (/^https?:\/\//i.test(trimmed) || trimmed.length > 24 || /[^0-9A-Za-z\-]/.test(trimmed)) {
+                    return 'QR-KOD';
+                }
+                return 'STRECKKOD';
+            }
+
+            function isBarcodeNumeric(code) {
+                return /^\d{8,14}$/.test(code.trim());
+            }
+
+            async function fetchProductFromOpenFoodFacts(barcode) {
+                try {
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 4500);
+                    const response = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`, {
+                        signal: controller.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) return null;
+                    const data = await response.json();
+
+                    if (data && data.status === 1 && data.product) {
+                        const p = data.product;
+                        const name = p.product_name_sv || p.product_name || p.generic_name_sv || p.generic_name || '';
+                        const brand = p.brands ? p.brands.split(',')[0].trim() : '';
+                        if (name.trim()) {
+                            return { name: name.trim(), brand: brand };
+                        }
+                    }
+                    return null;
+                } catch (err) {
+                    return null;
+                }
+            }
+
+            // --- Hantera en skannad kod och spara till molnet + lokal backup ---
+            async function handleScannedCode(rawCode, rawFormat = '', bypassCooldown = false) {
+                const code = String(rawCode || '').trim();
+                if (!code) return;
+
+                const now = Date.now();
+                if (!bypassCooldown && code === lastScannedCode && (now - lastScannedTime) < SCAN_COOLDOWN_MS) {
+                    return;
+                }
+                lastScannedCode = code;
+                lastScannedTime = now;
+
+                playBeepSound();
+                triggerVisualFeedback();
+
+                // Om Admin klickat "Skanna in" till katalogformuläret: fyll i fältet istället för listan!
+                if (isAdminMode && isCapturingForCatalog) {
+                    catalogCodeInput.value = code;
+                    setCaptureForCatalog(false);
+                    catalogNameInput.focus();
+                    showToast(`Fångade kod "${code}" till formuläret! Fyll i namn och spara.`, 'admin');
+                    return;
+                }
+
+                const codeType = detectCodeType(code, rawFormat);
+                const docId = toDocId(code);
+                const existingIndex = scannedItems.findIndex(item => item.code === code);
+
+                // Om koden redan finns i listan: öka antal och flytta högst upp
+                if (existingIndex !== -1) {
+                    const existingItem = scannedItems[existingIndex];
+                    const nextQty = existingItem.quantity + 1;
+                    existingItem.quantity = nextQty;
+                    existingItem.timestamp = now;
+                    existingItem.justUpdated = true;
+
+                    scannedItems.splice(existingIndex, 1);
+                    scannedItems.unshift(existingItem);
+                    saveBackupScanned(scannedItems);
+                    renderList();
+                    showToast(`+1 ${existingItem.name} (Totalt: ${nextQty} st)`, 'success');
+
+                    if (db && currentUser) {
+                        try {
+                            setCloudStatus('syncing', 'Sparar i molnet...');
+                            await updateDoc(doc(getScannedCollection(), docId), {
+                                quantity: nextQty,
+                                timestamp: now
+                            });
+                            setCloudStatus('synced', 'Sparat & synkat i molnet');
+                        } catch (err) {
+                            console.error('Kunde inte uppdatera antal i molnet:', err);
+                        }
+                    }
+
+                    setTimeout(() => {
+                        const target = scannedItems.find(i => i.code === code);
+                        if (target) {
+                            target.justUpdated = false;
+                            renderList();
+                        }
+                    }, 1200);
+                    return;
+                }
+
+                // 1. Slå upp i produktkatalogen först
+                const catalogEntry = productCatalog[code];
+                const shouldLookupApi = !catalogEntry && isBarcodeNumeric(code);
+
+                const itemPayload = {
+                    code: code,
+                    name: catalogEntry ? catalogEntry.name : (shouldLookupApi ? 'Söker produktinfo...' : code),
+                    brand: catalogEntry ? (catalogEntry.brand || '') : '',
+                    price: catalogEntry ? (catalogEntry.price || '') : '',
+                    type: catalogEntry ? (catalogEntry.type || codeType) : codeType,
+                    quantity: 1,
+                    timestamp: now,
+                    source: catalogEntry ? 'catalog' : (shouldLookupApi ? 'api' : 'raw'),
+                    loading: shouldLookupApi
+                };
+
+                scannedItems.unshift({
+                    id: docId,
+                    ...itemPayload,
+                    justUpdated: true
+                });
+                saveBackupScanned(scannedItems);
+                renderList();
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Sparar i molnet...');
+                        await setDoc(doc(getScannedCollection(), docId), itemPayload);
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte spara ny vara i molnet:', err);
+                    }
+                }
+
+                if (catalogEntry) {
+                    showToast(`Skannade: ${catalogEntry.name}`, 'success');
+                } else if (!shouldLookupApi) {
+                    showToast(`Skannade ${codeType}: ${code.slice(0, 32)}${code.length > 32 ? '...' : ''}`, 'info');
+                }
+
+                setTimeout(() => {
+                    const target = scannedItems.find(i => i.code === code);
+                    if (target) {
+                        target.justUpdated = false;
+                        renderList();
+                    }
+                }, 1200);
+
+                // 2. Slå upp via Open Food Facts om koden inte fanns i Admin-katalogen
+                if (shouldLookupApi) {
+                    const apiResult = await fetchProductFromOpenFoodFacts(code);
+                    const resolvedName = (apiResult && apiResult.name) ? apiResult.name : `Okänd produkt (${code})`;
+                    const resolvedBrand = (apiResult && apiResult.brand) ? apiResult.brand : '';
+                    const resolvedSource = (apiResult && apiResult.name) ? 'api' : 'unknown';
+
+                    const target = scannedItems.find(i => i.code === code);
+                    if (target) {
+                        target.loading = false;
+                        target.name = resolvedName;
+                        target.brand = resolvedBrand;
+                        target.source = resolvedSource;
+                        saveBackupScanned(scannedItems);
+                        renderList();
+                    }
+
+                    if (apiResult && apiResult.name) {
+                        showToast(`Hittade produkt: ${resolvedName}`, 'success');
+                    } else {
+                        showToast(`Koden ${code} saknas i katalogen.`, 'warning');
+                    }
+
+                    if (db && currentUser) {
+                        try {
+                            await updateDoc(doc(getScannedCollection(), docId), {
+                                loading: false,
+                                name: resolvedName,
+                                brand: resolvedBrand,
+                                source: resolvedSource
+                            });
+                        } catch (err) {
+                            console.error('Kunde inte uppdatera API-info i molnet:', err);
+                        }
+                    }
+                }
+            }
+
+            // --- Admin: Kataloghantering (Lägg till / Ta bort / Skanna in) ---
+            function setCaptureForCatalog(active) {
+                isCapturingForCatalog = active;
+                if (active) {
+                    adminCaptureBanner.classList.remove('hidden');
+                    if (!isScanning) {
+                        startCamera();
+                    }
+                } else {
+                    adminCaptureBanner.classList.add('hidden');
+                }
+            }
+
+            scanToCatalogBtn.addEventListener('click', () => {
+                setCaptureForCatalog(!isCapturingForCatalog);
+            });
+
+            cancelCaptureBtn.addEventListener('click', () => {
+                setCaptureForCatalog(false);
+            });
+
+            adminCatalogForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                if (!isAdminMode) return;
+
+                const code = catalogCodeInput.value.trim();
+                const name = catalogNameInput.value.trim();
+                const brand = catalogBrandInput.value.trim();
+                const price = catalogPriceInput.value.trim();
+
+                if (!code || !name) return;
+
+                const isUpdate = Boolean(productCatalog[code]);
+                const catalogPayload = {
+                    code,
+                    name,
+                    brand,
+                    price,
+                    type: detectCodeType(code),
+                    updatedAt: Date.now()
+                };
+
+                productCatalog[code] = catalogPayload;
+                saveBackupCatalog(productCatalog);
+                renderCatalog();
+                renderQuicktestButtons();
+
+                catalogCodeInput.value = '';
+                catalogNameInput.value = '';
+                catalogBrandInput.value = '';
+                catalogPriceInput.value = '';
+
+                playBeepSound();
+                showToast(
+                    isUpdate ? `Uppdaterade "${name}" (${code}) på alla enheter!` : `Lade till "${name}" (${code}) i molnkatalogen!`,
+                    'admin'
+                );
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Sparar kod i molnet...');
+                        const docId = toDocId(code);
+                        await setDoc(doc(getCatalogCollection(), docId), catalogPayload);
+
+                        // Uppdatera även om varan redan ligger i skannade listan
+                        const existingScanned = scannedItems.find(i => i.code === code);
+                        if (existingScanned) {
+                            await updateDoc(doc(getScannedCollection(), docId), {
+                                name,
+                                brand,
+                                price,
+                                source: 'catalog'
+                            });
+                        }
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte spara katalogkod i molnet:', err);
+                        showToast('Sparades lokalt men kunde inte nå molnet.', 'warning');
+                    }
+                }
+            });
+
+            window.deleteCatalogCode = async function(encodedCode) {
+                if (!isAdminMode) return;
+                const code = decodeURIComponent(encodedCode);
+                const entry = productCatalog[code];
+                if (!entry) return;
+
+                delete productCatalog[code];
+                saveBackupCatalog(productCatalog);
+                renderCatalog();
+                renderQuicktestButtons();
+                showToast(`Tog bort "${entry.name}" (${code}) ur katalogen.`, 'info');
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Tar bort kod...');
+                        await deleteDoc(doc(getCatalogCollection(), toDocId(code)));
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte radera kod ur molnkatalogen:', err);
+                    }
+                }
+            };
+
+            function renderCatalog() {
+                const entries = Object.values(productCatalog).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+                catalogCountBadge.textContent = `${entries.length} ${entries.length === 1 ? 'kod' : 'koder'}`;
+
+                const query = catalogSearchInput.value.trim().toLowerCase();
+                const filtered = entries.filter(item => {
+                    if (!query) return true;
+                    return item.name.toLowerCase().includes(query) ||
+                           item.code.toLowerCase().includes(query) ||
+                           (item.brand && item.brand.toLowerCase().includes(query));
+                });
+
+                if (filtered.length === 0) {
+                    adminCatalogList.innerHTML = `
+                        <div class="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                            ${entries.length === 0 ? 'Katalogen är tom. Lägg till din första kod till vänster!' : 'Inga koder matchade sökningen.'}
+                        </div>
+                    `;
+                    return;
+                }
+
+                adminCatalogList.innerHTML = filtered.map(item => `
+                    <div class="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-950/90 border border-slate-800 hover:border-purple-500/35 transition">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <span class="text-xs font-semibold text-white truncate">${escapeHtml(item.name)}</span>
+                                ${item.brand ? `<span class="text-[11px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">${escapeHtml(item.brand)}</span>` : ''}
+                                ${item.price ? `<span class="text-[11px] font-medium text-emerald-400">${escapeHtml(item.price)}</span>` : ''}
+                            </div>
+                            <div class="text-[11px] font-mono text-purple-300/80 mt-0.5 truncate">${escapeHtml(item.code)}</div>
+                        </div>
+
+                        <button type="button" onclick="deleteCatalogCode('${encodeURIComponent(item.code)}')" class="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-rose-500/20 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-300 text-xs font-medium transition flex items-center gap-1 shrink-0" title="Ta bort kod ur katalogen">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
+                            <span>Ta bort</span>
+                        </button>
+                    </div>
+                `).join('');
+            }
+
+            catalogSearchInput.addEventListener('input', renderCatalog);
+
+            // Rendera snabbtestknappar i Vanlig vy baserat på de koder som finns i katalogen
+            function renderQuicktestButtons() {
+                const entries = Object.values(productCatalog)
+                    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+                    .slice(0, 4);
+
+                if (entries.length === 0) {
+                    quicktestButtonsGrid.innerHTML = `
+                        <div class="col-span-2 text-xs text-slate-500 text-center py-3 bg-slate-950 rounded-xl border border-slate-800">
+                            Inga koder i katalogen ännu. Logga in som Admin för att lägga till koder.
+                        </div>
+                    `;
+                    return;
+                }
+
+                quicktestButtonsGrid.innerHTML = entries.map(item => `
+                    <button type="button" onclick="triggerQuickScan('${encodeURIComponent(item.code)}')" class="text-left p-2.5 rounded-xl bg-slate-950 hover:bg-slate-800/90 border border-slate-800 hover:border-cyan-500/40 transition group">
+                        <div class="text-xs font-semibold text-slate-200 group-hover:text-cyan-300 truncate">${escapeHtml(item.name)}</div>
+                        <div class="text-[11px] font-mono text-slate-500 truncate">${escapeHtml(item.code)}</div>
+                    </button>
+                `).join('');
+            }
+
+            window.triggerQuickScan = function(encodedCode) {
+                const code = decodeURIComponent(encodedCode);
+                handleScannedCode(code, '', true);
+            };
+
+            // --- Kamerahantering med html5-qrcode ---
+            function setScannerUIState(active) {
+                isScanning = active;
+                if (active) {
+                    cameraPlaceholder.classList.add('hidden');
+                    scanOverlay.classList.remove('hidden');
+                    cameraErrorBox.classList.add('hidden');
+                    startCameraBtn.classList.add('hidden');
+                    stopCameraBtn.classList.remove('hidden');
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]';
+                    scannerStatusText.textContent = isCapturingForCatalog ? 'Skannar kod till katalog...' : 'Skanner aktiv – sikta på kod';
+                    scannerStatusText.className = 'text-xs font-semibold uppercase tracking-wider text-emerald-400';
+                } else {
+                    cameraPlaceholder.classList.remove('hidden');
+                    scanOverlay.classList.add('hidden');
+                    startCameraBtn.classList.remove('hidden');
+                    stopCameraBtn.classList.add('hidden');
+                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-slate-600';
+                    scannerStatusText.textContent = 'Kamera vilande';
+                    scannerStatusText.className = 'text-xs font-semibold uppercase tracking-wider text-slate-400';
+                }
+            }
+
+            function showCameraError(title, description) {
+                cameraErrorTitle.textContent = title;
+                cameraErrorDesc.textContent = description;
+                cameraErrorBox.classList.remove('hidden');
+                setScannerUIState(false);
+            }
+
+            async function startCamera() {
+                if (isScanning) return;
+                cameraErrorBox.classList.add('hidden');
+
+                if (typeof Html5Qrcode === 'undefined') {
+                    showCameraError(
+                        'Skannerbiblioteket kunde inte laddas',
+                        'Kontrollera din internetanslutning och ladda om sidan.'
+                    );
+                    return;
+                }
+
+                try {
+                    if (!html5QrCode) {
+                        html5QrCode = new Html5Qrcode('qr-reader');
+                    }
+
+                    const config = {
+                        fps: 12,
+                        qrbox: (viewfinderWidth, viewfinderHeight) => {
+                            const width = Math.min(Math.floor(viewfinderWidth * 0.78), 300);
+                            const height = Math.min(Math.floor(viewfinderHeight * 0.65), 200);
+                            return { width: Math.max(width, 180), height: Math.max(height, 130) };
+                        },
+                        aspectRatio: 1.333333
+                    };
+
+                    await html5QrCode.start(
+                        { facingMode: 'environment' },
+                        config,
+                        (decodedText, decodedResult) => {
+                            const formatName = decodedResult?.result?.format?.formatName || '';
+                            handleScannedCode(decodedText, formatName, false);
+                        },
+                        () => {}
+                    );
+
+                    setScannerUIState(true);
+                } catch (err) {
+                    console.warn('Bakre kamera misslyckades, försöker standardkamera...', err);
+                    try {
+                        const cameras = await Html5Qrcode.getCameras();
+                        if (cameras && cameras.length > 0) {
+                            await html5QrCode.start(
+                                cameras[0].id,
+                                { fps: 12 },
+                                (decodedText, decodedResult) => {
+                                    const formatName = decodedResult?.result?.format?.formatName || '';
+                                    handleScannedCode(decodedText, formatName, false);
+                                },
+                                () => {}
+                            );
+                            setScannerUIState(true);
+                            return;
+                        }
+                    } catch (fallbackErr) {
+                        console.error('Kamerafel:', fallbackErr);
+                    }
+
+                    let title = 'Kunde inte öppna kameran';
+                    let desc = 'Tillåt kameraåtkomst i webbläsaren eller testa med en sparad vara nedan.';
+                    const errStr = String(err || '');
+                    if (errStr.includes('NotAllowedError') || errStr.includes('Permission')) {
+                        title = 'Kameratillstånd nekat';
+                        desc = 'Du behöver tillåta kameraåtkomst i webbläsarens adressfält för att skanna med kameran.';
+                    } else if (errStr.includes('NotFoundError') || errStr.includes('Requested device not found')) {
+                        title = 'Ingen kamera hittades';
+                        desc = 'Ingen kamera upptäcktes på denna enhet.';
+                    }
+                    showCameraError(title, desc);
+                }
+            }
+
+            async function stopCamera() {
+                if (!html5QrCode || !isScanning) return;
+                try {
+                    await html5QrCode.stop();
+                } catch (e) {
+                    console.warn('Fel vid stopp av kamera:', e);
+                }
+                setScannerUIState(false);
+            }
+
+            startCameraBtn.addEventListener('click', startCamera);
+            stopCameraBtn.addEventListener('click', stopCamera);
+
+            // --- Rendering av skannade produktlistan ---
+            function formatTime(timestamp) {
+                const date = new Date(timestamp);
+                return date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            }
+
+            function renderList() {
+                const totalUnits = scannedItems.reduce((sum, item) => sum + item.quantity, 0);
+                totalItemsBadge.textContent = `${totalUnits} ${totalUnits === 1 ? 'vara' : 'varor'}`;
+
+                const hasItems = scannedItems.length > 0;
+                copyListBtn.disabled = !hasItems;
+                exportCsvBtn.disabled = !hasItems;
+                clearListBtn.disabled = !hasItems;
+
+                if (scannedItems.length > 3) {
+                    listFilterBar.classList.remove('hidden');
+                } else {
+                    listFilterBar.classList.add('hidden');
+                    filterInput.value = '';
+                }
+
+                const query = filterInput.value.trim().toLowerCase();
+                const filteredItems = scannedItems.filter(item => {
+                    if (!query) return true;
+                    return item.name.toLowerCase().includes(query) ||
+                           item.code.toLowerCase().includes(query) ||
+                           (item.brand && item.brand.toLowerCase().includes(query));
+                });
+
+                if (!hasItems) {
+                    productListEl.innerHTML = '';
+                    productListEl.appendChild(emptyStateEl);
+                    emptyStateEl.classList.remove('hidden');
+                    return;
+                }
+
+                emptyStateEl.classList.add('hidden');
+
+                if (filteredItems.length === 0) {
+                    productListEl.innerHTML = `
+                        <div class="text-center py-10 text-slate-500 text-xs">
+                            Inga varor matchade sökningen "${escapeHtml(filterInput.value)}".
+                        </div>
+                    `;
+                    return;
+                }
+
+                productListEl.innerHTML = filteredItems.map(item => {
+                    const isUrl = /^https?:\/\//i.test(item.code);
+                    const highlightBorder = item.justUpdated
+                        ? 'border-emerald-400/80 bg-emerald-950/20 shadow-[0_0_20px_rgba(52,211,153,0.12)]'
+                        : 'border-slate-800/90 bg-slate-950/80 hover:border-slate-700';
+
+                    const typeBadgeClass = item.type === 'QR-KOD'
+                        ? 'bg-purple-500/15 text-purple-300 border-purple-500/30'
+                        : 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30';
+
+                    // Namnvisning: Admin kan klicka för att redigera, vanlig användare ser enbart text
+                    const nameHtml = item.loading ? `
+                        <div class="flex items-center gap-2 text-sm font-medium text-cyan-300 py-0.5">
+                            <svg class="w-4 h-4 animate-spin text-cyan-400" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                            </svg>
+                            Hämtar produktinfo...
+                        </div>
+                    ` : (isAdminMode ? `
+                        <button type="button" onclick="startEditItemName('${encodeURIComponent(item.code)}')" class="text-left text-sm sm:text-base font-semibold text-white hover:text-purple-300 transition truncate flex items-center gap-1.5 group" title="Klicka för att redigera produktnamn (Admin)">
+                            <span class="truncate">${escapeHtml(item.name)}</span>
+                            <svg class="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0 opacity-75 group-hover:opacity-100 transition" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                            </svg>
+                        </button>
+                    ` : `
+                        <div class="text-sm sm:text-base font-semibold text-white truncate">
+                            ${escapeHtml(item.name)}
+                        </div>
+                    `);
+
+                    // Antal & Åtgärder: Admin får +/- och Ta bort, vanlig användare ser enbart antal-bricka
+                    const actionsHtml = isAdminMode ? `
+                        <div class="flex items-center gap-2 shrink-0">
+                            <div class="flex items-center bg-slate-900 border border-slate-700/80 rounded-xl p-0.5">
+                                <button type="button" onclick="changeQuantity('${encodeURIComponent(item.code)}', -1)" class="w-8 h-8 rounded-lg hover:bg-slate-800 text-slate-300 hover:text-white flex items-center justify-center transition active:scale-90" title="Minska antal">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M20 12H4" />
+                                    </svg>
+                                </button>
+                                <span class="w-8 text-center text-sm font-bold text-white select-none">${item.quantity}</span>
+                                <button type="button" onclick="changeQuantity('${encodeURIComponent(item.code)}', 1)" class="w-8 h-8 rounded-lg hover:bg-slate-800 text-cyan-400 hover:text-cyan-300 flex items-center justify-center transition active:scale-90" title="Öka antal">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                </button>
+                            </div>
+
+                            <button type="button" onclick="removeItem('${encodeURIComponent(item.code)}')" class="w-9 h-9 rounded-xl bg-slate-900 hover:bg-rose-500/20 border border-slate-800 hover:border-rose-500/40 text-slate-400 hover:text-rose-400 flex items-center justify-center transition active:scale-90" title="Ta bort vara (Admin)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    ` : `
+                        <div class="shrink-0 flex items-center">
+                            <span class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs font-bold text-cyan-300">
+                                ${item.quantity} st
+                            </span>
+                        </div>
+                    `;
+
+                    return `
+                        <div class="p-3.5 sm:p-4 rounded-xl border transition-all duration-300 ${highlightBorder}" data-item-code="${encodeURIComponent(item.code)}">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0 flex-1">
+                                    <div class="flex items-center gap-2 flex-wrap mb-1">
+                                        <span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md border ${typeBadgeClass}">
+                                            ${escapeHtml(item.type)}
+                                        </span>
+                                        ${item.brand ? `<span class="text-[11px] font-medium text-slate-400 truncate max-w-[160px]">${escapeHtml(item.brand)}</span>` : ''}
+                                        ${item.price ? `<span class="text-[11px] font-semibold text-emerald-400">${escapeHtml(item.price)}</span>` : ''}
+                                        <span class="text-[11px] text-slate-600">• ${formatTime(item.timestamp)}</span>
+                                    </div>
+
+                                    <!-- Produktnamn -->
+                                    <div class="name-display-container">
+                                        ${nameHtml}
+                                    </div>
+
+                                    <!-- Streckkod / QR-innehåll -->
+                                    <div class="mt-1 flex items-center gap-2 flex-wrap">
+                                        <span class="text-xs font-mono text-slate-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800/80 break-all">
+                                            ${escapeHtml(item.code)}
+                                        </span>
+                                        ${isUrl ? `
+                                            <a href="${escapeHtml(item.code)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 underline underline-offset-2">
+                                                Öppna länk
+                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                                </svg>
+                                            </a>
+                                        ` : ''}
+                                    </div>
+                                </div>
+
+                                ${actionsHtml}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            // --- Admin-åtgärder på den skannade listan (sparas i moln + lokal backup) ---
+            window.changeQuantity = async function(encodedCode, delta) {
+                if (!isAdminMode) return;
+                const code = decodeURIComponent(encodedCode);
+                const idx = scannedItems.findIndex(i => i.code === code);
+                if (idx === -1) return;
+
+                const item = scannedItems[idx];
+                const nextQty = item.quantity + delta;
+                const docId = toDocId(code);
+
+                if (nextQty <= 0) {
+                    scannedItems.splice(idx, 1);
+                    saveBackupScanned(scannedItems);
+                    renderList();
+                    showToast(`Tog bort "${item.name}" från listan.`, 'info');
+
+                    if (db && currentUser) {
+                        try {
+                            setCloudStatus('syncing', 'Tar bort...');
+                            await deleteDoc(doc(getScannedCollection(), docId));
+                            setCloudStatus('synced', 'Sparat & synkat i molnet');
+                        } catch (err) {
+                            console.error('Kunde inte radera vara i molnet:', err);
+                        }
+                    }
+                } else {
+                    item.quantity = nextQty;
+                    saveBackupScanned(scannedItems);
+                    renderList();
+
+                    if (db && currentUser) {
+                        try {
+                            setCloudStatus('syncing', 'Sparar antal...');
+                            await updateDoc(doc(getScannedCollection(), docId), { quantity: nextQty });
+                            setCloudStatus('synced', 'Sparat & synkat i molnet');
+                        } catch (err) {
+                            console.error('Kunde inte uppdatera antal i molnet:', err);
+                        }
+                    }
+                }
+            };
+
+            window.removeItem = async function(encodedCode) {
+                if (!isAdminMode) return;
+                const code = decodeURIComponent(encodedCode);
+                const idx = scannedItems.findIndex(i => i.code === code);
+                if (idx === -1) return;
+
+                const removed = scannedItems.splice(idx, 1)[0];
+                saveBackupScanned(scannedItems);
+                renderList();
+                showToast(`Tog bort "${removed.name}".`, 'info');
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Tar bort...');
+                        await deleteDoc(doc(getScannedCollection(), toDocId(code)));
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte ta bort vara i molnet:', err);
+                    }
+                }
+            };
+
+            window.startEditItemName = function(encodedCode) {
+                if (!isAdminMode) return;
+                const code = decodeURIComponent(encodedCode);
+                const item = scannedItems.find(i => i.code === code);
+                if (!item) return;
+
+                const card = document.querySelector(`[data-item-code="${encodedCode}"]`);
+                if (!card) return;
+
+                const container = card.querySelector('.name-display-container');
+                if (!container) return;
+
+                const initialVal = item.name.startsWith('Okänd produkt (') ? '' : item.name;
+                const safeInputId = 'edit-input-' + toDocId(code).replace(/[^a-zA-Z0-9_-]/g, '_');
+
+                container.innerHTML = `
+                    <form onsubmit="saveEditedItemName(event, '${encodedCode}', '${safeInputId}')" class="flex items-center gap-1.5 w-full max-w-md my-0.5">
+                        <input 
+                            type="text" 
+                            id="${safeInputId}" 
+                            value="${escapeHtml(initialVal)}" 
+                            placeholder="Ange produktnamn..."
+                            class="flex-1 bg-slate-900 border border-purple-400 rounded-lg px-2.5 py-1 text-sm text-white outline-none"
+                            required
+                        >
+                        <button type="submit" class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold text-xs transition">
+                            Spara
+                        </button>
+                        <button type="button" onclick="renderList()" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition">
+                            Avbryt
+                        </button>
+                    </form>
+                `;
+
+                const input = document.getElementById(safeInputId);
+                if (input) {
+                    input.focus();
+                    input.select();
+                }
+            };
+
+            window.saveEditedItemName = async function(event, encodedCode, inputId) {
+                event.preventDefault();
+                if (!isAdminMode) return;
+                const code = decodeURIComponent(encodedCode);
+                const input = document.getElementById(inputId);
+                if (!input) return;
+
+                const newName = input.value.trim();
+                if (!newName) return;
+
+                const item = scannedItems.find(i => i.code === code);
+                const catalogData = {
+                    code: code,
+                    name: newName,
+                    brand: item ? (item.brand || '') : '',
+                    price: item ? (item.price || '') : '',
+                    type: item ? item.type : detectCodeType(code),
+                    updatedAt: Date.now()
+                };
+
+                if (item) {
+                    item.name = newName;
+                    item.source = 'catalog';
+                }
+                productCatalog[code] = catalogData;
+
+                saveBackupScanned(scannedItems);
+                saveBackupCatalog(productCatalog);
+                renderCatalog();
+                renderQuicktestButtons();
+                renderList();
+                showToast(`Sparade "${newName}" i katalogen för kod ${code}.`, 'admin');
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Sparar namn...');
+                        const docId = toDocId(code);
+                        await setDoc(doc(getCatalogCollection(), docId), catalogData);
+                        await updateDoc(doc(getScannedCollection(), docId), {
+                            name: newName,
+                            source: 'catalog'
+                        });
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte spara redigerat namn i molnet:', err);
+                    }
+                }
+            };
+
+            window.renderList = renderList;
+            filterInput.addEventListener('input', renderList);
+
+            // --- Export, Kopiering & Rensning ---
+            copyListBtn.addEventListener('click', () => {
+                if (scannedItems.length === 0) return;
+
+                const lines = scannedItems.map(item =>
+                    `${item.quantity}x ${item.name} [${item.code}]`
+                );
+                const textToCopy = `Skannade produkter (${new Date().toLocaleDateString('sv-SE')}):\n` + lines.join('\n');
+
+                clipboardHelper.value = textToCopy;
+                clipboardHelper.select();
+                clipboardHelper.setSelectionRange(0, 99999);
+
+                try {
+                    const ok = document.execCommand('copy');
+                    if (ok) {
+                        showToast('Listan kopierades till urklipp!', 'success');
+                    } else {
+                        showToast('Kunde inte kopiera automatiskt.', 'warning');
+                    }
+                } catch (e) {
+                    showToast('Kunde inte kopiera till urklipp.', 'error');
+                }
+            });
+
+            exportCsvBtn.addEventListener('click', () => {
+                if (scannedItems.length === 0) return;
+
+                const headers = ['Produktnamn', 'Varumärke', 'Pris', 'Kod', 'Typ', 'Antal', 'Tidpunkt'];
+                const rows = scannedItems.map(item => [
+                    `"${item.name.replace(/"/g, '""')}"`,
+                    `"${(item.brand || '').replace(/"/g, '""')}"`,
+                    `"${(item.price || '').replace(/"/g, '""')}"`,
+                    `"${item.code.replace(/"/g, '""')}"`,
+                    `"${item.type}"`,
+                    item.quantity,
+                    `"${new Date(item.timestamp).toLocaleString('sv-SE')}"`
+                ]);
+
+                const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+                const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                const url = URL.createObjectURL(blob);
+
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `skannade-produkter-${new Date().toISOString().slice(0, 10)}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+
+                showToast('CSV-fil nedladdad!', 'success');
+            });
+
+            clearListBtn.addEventListener('click', () => {
+                if (!isAdminMode || scannedItems.length === 0) return;
+                clearConfirmBanner.classList.remove('hidden');
+            });
+
+            cancelClearBtn.addEventListener('click', () => {
+                clearConfirmBanner.classList.add('hidden');
+            });
+
+            confirmClearBtn.addEventListener('click', async () => {
+                if (!isAdminMode) return;
+                const itemsToDelete = [...scannedItems];
+                scannedItems = [];
+                lastScannedCode = null;
+                saveBackupScanned(scannedItems);
+                clearConfirmBanner.classList.add('hidden');
+                renderList();
+                showToast('Hela listan har rensats på alla enheter.', 'info');
+
+                if (db && currentUser) {
+                    try {
+                        setCloudStatus('syncing', 'Rensar molnlistan...');
+                        await Promise.all(
+                            itemsToDelete.map(item => deleteDoc(doc(getScannedCollection(), toDocId(item.code))))
+                        );
+                        setCloudStatus('synced', 'Sparat & synkat i molnet');
+                    } catch (err) {
+                        console.error('Kunde inte rensa molnlistan:', err);
+                    }
+                }
+            });
+
+            function escapeHtml(str) {
+                return String(str)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            // Initiera gränssnitt omedelbart från lokal backup och koppla sedan upp molnsynk
+            updateSoundUI();
+            renderCatalog();
+            updateRoleUI();
+            await initCloudSync();
+        });
+    </script>
+</body>
+</html>
